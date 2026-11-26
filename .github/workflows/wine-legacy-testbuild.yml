@@ -36,6 +36,9 @@ jobs:
           $env:NODE_GYP_FORCE_PYTHON = (Get-Command python.exe).Source
           python -m pip install setuptools
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $cefName = (Get-Content 'vendor/cef/cef_build_name.txt' -Encoding ascii).Trim()
+          curl.exe --fail --silent --show-error --location --retry 4 --retry-all-errors --retry-delay 3 --connect-timeout 20 --max-time 300 --create-dirs --output "code/build/$cefName.zip" "https://cfx-content.akamaized.net/mirrors/vendor/cef/v144/$cefName.zip"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./fxd.ps1 get-chrome
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./prebuild.cmd
