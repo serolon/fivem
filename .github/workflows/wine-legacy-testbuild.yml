@@ -1,0 +1,63 @@
+name: FiveM Legacy Wine test build
+
+on:
+  push:
+    branches: [wine-legacy-pr4095]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 50
+    steps:
+      - name: Check out the test branch
+        shell: bash
+        run: |
+          set -e
+          mkdir -p /c/b/five
+          cd /c/b/five
+          git init
+          git config core.symlinks true
+          git config core.longpaths true
+          git remote add origin https://github.com/serolon/fivem.git
+          git fetch --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          git submodule update --init --depth 1 --jobs 4
+      - name: Prepare the FiveM source
+        shell: pwsh
+        working-directory: C:\b\five
+        run: |
+          py -m pip install setuptools
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./fxd.ps1 get-chrome
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./prebuild.cmd
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./fxd.ps1 gen -game five
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Compile FiveM Legacy
+        shell: pwsh
+        working-directory: C:\b\five
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild = & $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -find MSBuild\Current\Bin\MSBuild.exe |
+            Select-Object -First 1
+          if (!$msbuild) { throw 'Visual Studio MSBuild was not found.' }
+          & $msbuild code/build/five/CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:PreferredToolArchitecture=x64 -p:Configuration=Release -p:WindowsTargetPlatformVersion=10.0.22621.0 -m:4 -v:m
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Collect the patched components and license notices
+        shell: pwsh
+        working-directory: C:\b\five
+        run: |
+          $bin = 'code/bin/five/release'
+          New-Item -ItemType Directory -Path test-build | Out-Null
+          Copy-Item "$bin/FiveM.exe", "$bin/CoreRT.dll", LICENSE, THIRD_PARTY_NOTICES.md, LICENSES -Destination test-build -Recurse -ErrorAction Stop
+          git rev-parse HEAD | Set-Content test-build/source-commit.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fivem-legacy-wine-pr4095
+          path: C:/b/five/test-build/
+          if-no-files-found: error
+          retention-days: 7
