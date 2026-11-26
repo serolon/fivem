@@ -206,4 +206,23 @@ public:
 	void HandlePopupShow(bool show);
 
 	bool IsFixedSizeWindow() const;
+
+	bool UsesWineSoftwarePaint() const;
+	void QueueSoftwarePaint(CefRenderHandler::PaintElementType type, const void* buffer, int width, int height);
+	bool HasPaintedSoftwareView() const { return m_softwarePaintedView; }
+
+private:
+	void UpdateSoftwarePaint();
+
+	struct SoftwarePaintFrame
+	{
+		std::vector<uint8_t> pixels;
+		int width = 0;
+		int height = 0;
+	};
+
+	std::mutex m_softwarePaintMutex;
+	SoftwarePaintFrame m_softwareFrames[kMaxPaintElements];
+	bool m_softwarePopupVisible = false;
+	bool m_softwarePaintedView = false;
 };

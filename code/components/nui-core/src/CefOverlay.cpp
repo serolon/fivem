@@ -238,6 +238,12 @@ namespace nui
 		return g_mainUIFlag;
 	}
 
+	bool HasPaintedSoftwareMainUI()
+	{
+		const auto window = GetWindow();
+		return window.GetRef() && window->HasPaintedSoftwareView();
+	}
+
 	std::unordered_map<std::string, fwRefContainer<NUIWindow>> windowList;
 	std::shared_mutex windowListMutex;
 	

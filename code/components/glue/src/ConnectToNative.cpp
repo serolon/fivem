@@ -45,6 +45,7 @@
 #include <rapidjson/writer.h>
 
 #include <LauncherIPC.h>
+#include <LaunchMode.h>
 
 #include <CrossBuildRuntime.h>
 
@@ -257,7 +258,13 @@ static void SetNickname(const std::string& name)
 	UpdatePendingAuthPayload();
 }
 
-static void ConnectTo(const std::string& hostnameStr, bool fromUI = false, const std::string& connectParams = "")
+static bool UseWineDirectConnect()
+{
+	const auto setting = getenv("CitizenFX_WineDirectConnect");
+	return CfxIsWine() && setting && strcmp(setting, "1") == 0;
+}
+
+static void ConnectTo(const std::string& hostnameStr, bool useNativeConnection = false, const std::string& connectParams = "")
 {
 	auto connectParamsReal = connectParams;
 	static bool switched;
@@ -268,7 +275,7 @@ static void ConnectTo(const std::string& hostnameStr, bool fromUI = false, const
 		switched = true;
 	}
 
-	if (!fromUI && !launch::IsSDKGuest())
+	if (!useNativeConnection && !launch::IsSDKGuest())
 	{
 		if (nui::HasMainUI())
 		{
@@ -628,7 +635,7 @@ static InitFunction initFunction([] ()
 		{
 			std::string error = errorOrig;
 
-			console::Printf("no_console", "OnConnectionError: %s\n", error);
+			console::Printf(UseWineDirectConnect() ? "connect" : "no_console", "OnConnectionError: %s\n", error);
 
 			g_connected = false;
 
@@ -647,7 +654,7 @@ static InitFunction initFunction([] ()
 
 		netLibrary->OnConnectionProgress.Connect([] (const std::string& message, int progress, int totalProgress, bool cancelable)
 		{
-			console::Printf("no_console", "OnConnectionProgress: %s\n", message);
+			console::Printf(UseWineDirectConnect() ? "connect" : "no_console", "OnConnectionProgress: %s\n", message);
 
 			rapidjson::Document document;
 			document.SetObject();
@@ -799,7 +806,7 @@ static InitFunction initFunction([] ()
 
 	static ConsoleCommand connectCommand("connect", [](const std::string& server)
 	{
-		ConnectTo(server);
+		ConnectTo(server, UseWineDirectConnect());
 	});
 
 	ep.Bind("connectTo", [](const std::string& url)

@@ -61,12 +61,12 @@ NUIWindow::~NUIWindow()
 
 	if (nuiClient)
 	{
-		nuiClient->SetWindowValid(false);
-		nuiClient->ClearWindow();
-
 		CefRefPtr<CefBrowser> browser;
 		{
 			std::unique_lock _(nuiClient->GetWindowLock());
+			nuiClient->SetWindowValid(false);
+			nuiClient->ClearWindow();
+
 			if (nuiClient->GetBrowser() && nuiClient->GetBrowser()->GetHost())
 			{
 				browser = nuiClient->GetBrowser();
@@ -179,6 +179,21 @@ static int GetPrimaryMonitorRefreshRate()
 	return 240;
 }
 
+bool NUIWindow::UsesWineSoftwarePaint() const
+{
+#ifdef GTA_FIVE
+	static const bool enabled = []()
+	{
+		const auto setting = getenv("CitizenFX_WineSoftwareNui");
+		return CfxIsWine() && setting && strcmp(setting, "1") == 0;
+	}();
+
+	return IsPrimary() && enabled;
+#else
+	return false;
+#endif
+}
+
 void NUIWindow::Initialize(CefString url)
 {
 	InitializeRenderBacking();
@@ -193,7 +208,7 @@ void NUIWindow::Initialize(CefString url)
 
 	CefWindowInfo info;
 	info.SetAsWindowless(NULL);
-	info.shared_texture_enabled = true;
+	info.shared_texture_enabled = !UsesWineSoftwarePaint();
 	info.bounds.x = 0;
 	info.bounds.y = 0;
 	info.bounds.width = m_width;
@@ -201,7 +216,7 @@ void NUIWindow::Initialize(CefString url)
 
 	CefBrowserSettings settings;
 	settings.javascript_close_windows = STATE_DISABLED;
-	settings.windowless_frame_rate = GetPrimaryMonitorRefreshRate(); // 240;
+	settings.windowless_frame_rate = UsesWineSoftwarePaint() ? 30 : GetPrimaryMonitorRefreshRate();
 	CefString(&settings.default_encoding).FromString("utf-8");
 
 	CefRefPtr<CefRequestContext> rc;
@@ -227,7 +242,7 @@ void NUIWindow::Initialize(CefString url)
 
 void NUIWindow::InitializeRenderBacking()
 {
-	if (!nui::g_rendererInit)
+	if (!nui::g_rendererInit || UsesWineSoftwarePaint())
 	{
 		return;
 	}
@@ -310,7 +325,14 @@ void NUIWindow::UpdateFrame()
 		}
 	}
 
-	if (!GetTexture().GetRef())
+	if (UsesWineSoftwarePaint())
+	{
+		if (nui::g_rendererInit)
+		{
+			UpdateSoftwarePaint();
+		}
+	}
+	else if (!GetTexture().GetRef())
 	{
 		return;
 	}
@@ -583,6 +605,21 @@ void NUIWindow::SignalPoll(std::string& argument)
 
 void NUIWindow::HandlePopupShow(bool show)
 {
+	if (UsesWineSoftwarePaint())
+	{
+		std::lock_guard paintLock(m_softwarePaintMutex);
+		m_softwarePopupVisible = show;
+
+		if (!show)
+		{
+			std::lock_guard textureLock(m_textureMutex);
+			m_softwareFrames[PET_POPUP].pixels.clear();
+			m_popupTexture = nullptr;
+		}
+
+		return;
+	}
+
 	if (!show)
 	{
 		auto popupTex = GetParentTexture(CefRenderHandler::PaintElementType::PET_POPUP);
@@ -595,6 +632,57 @@ void NUIWindow::HandlePopupShow(bool show)
 #ifdef IS_RDR3
 			m_sharedResourceTexturesCreated[PET_POPUP] = false;
 #endif
+		}
+	}
+}
+
+void NUIWindow::QueueSoftwarePaint(CefRenderHandler::PaintElementType type, const void* buffer, int width, int height)
+{
+	if ((type != PET_VIEW && type != PET_POPUP) || !buffer || width <= 0 || height <= 0 || width > 8192 || height > 8192)
+	{
+		return;
+	}
+
+	std::lock_guard _(m_softwarePaintMutex);
+	if (type == PET_POPUP && !m_softwarePopupVisible)
+	{
+		return;
+	}
+
+	// CEF provides the entire BGRA surface. Keep only the most recent frame
+	// because the dirty rectangles are unreliable on the software paint path.
+	auto& frame = m_softwareFrames[type];
+	const auto* pixels = static_cast<const uint8_t*>(buffer);
+	frame.pixels.assign(pixels, pixels + size_t(width) * height * 4);
+	frame.width = width;
+	frame.height = height;
+}
+
+void NUIWindow::UpdateSoftwarePaint()
+{
+	std::lock_guard paintLock(m_softwarePaintMutex);
+	std::lock_guard textureLock(m_textureMutex);
+
+	for (int index = 0; index < kMaxPaintElements; index++)
+	{
+		auto& frame = m_softwareFrames[index];
+		if (frame.pixels.empty())
+		{
+			continue;
+		}
+
+		auto texture = g_nuiGi->CreateTexture(frame.width, frame.height, nui::GITextureFormat::ARGB, frame.pixels.data());
+		frame.pixels.clear();
+		if (!texture.GetRef() || !texture->GetHostTexture())
+		{
+			continue;
+		}
+
+		auto& current = index == PET_VIEW ? m_nuiTexture : m_popupTexture;
+		current = std::move(texture);
+		if (index == PET_VIEW)
+		{
+			m_softwarePaintedView = true;
 		}
 	}
 }
@@ -709,9 +797,11 @@ CefRect NUIWindow::GetPopupRect()
 void NUIWindow::SetPopupRect(const CefRect& rect)
 {
 	m_popupRect = rect;
-
-	std::lock_guard<std::shared_mutex> _(m_textureMutex);
-	m_popupTexture = g_nuiGi->CreateTextureBacking(rect.width, rect.height, nui::GITextureFormat::ARGB);
+	if (!UsesWineSoftwarePaint())
+	{
+		std::lock_guard<std::shared_mutex> _(m_textureMutex);
+		m_popupTexture = g_nuiGi->CreateTextureBacking(rect.width, rect.height, nui::GITextureFormat::ARGB);
+	}
 }
 
 void NUIWindow::SetPaintType(NUIPaintType type)

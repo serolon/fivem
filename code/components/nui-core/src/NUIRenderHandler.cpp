@@ -85,7 +85,16 @@ void NUIRenderHandler::OnImeCompositionRangeChanged(CefRefPtr<CefBrowser> browse
 
 void NUIRenderHandler::OnPaint(CefRefPtr<CefBrowser> browser, PaintElementType type, const RectList& dirtyRects, const void* buffer, int width, int height)
 {
-	// OnPaint hasn't worked as intended since M103 
+	{
+		std::lock_guard _(m_owner->GetWindowLock());
+		if (m_owner->GetWindowValid() && m_owner->GetWindow()->UsesWineSoftwarePaint())
+		{
+			m_owner->GetWindow()->QueueSoftwarePaint(type, buffer, width, height);
+			return;
+		}
+	}
+
+	// OnPaint hasn't worked as intended since M103
 	// With inconsistent texture updates and incorrect dirty rect leading to partily stale frames.
 	trace("NUIRenderHandler::OnPaint was called, this may be a sign that the CEF process has fatally errored and isn't recoverable\n");
 }

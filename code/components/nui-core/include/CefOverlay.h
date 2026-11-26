@@ -375,6 +375,7 @@ namespace nui
 	void OVERLAY_DECL OverrideFocus(bool hasFocus);
 	void OVERLAY_DECL KeepInput(bool keepInput);
 	bool OVERLAY_DECL HasMainUI();
+	bool OVERLAY_DECL HasPaintedSoftwareMainUI();
 	void OVERLAY_DECL SetMainUI(bool enable);
 	void OVERLAY_DECL SetHideCursor(bool hide);
 

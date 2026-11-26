@@ -32,7 +32,7 @@ static InitFunction initFunction([]
 			return;
 		}
 
-		if (!g_nuiInitTimestamp || (GetTickCount64() - g_nuiInitTimestamp) < 7500)
+		if (!g_nuiInitTimestamp || (GetTickCount64() - g_nuiInitTimestamp) < 7500 || nui::HasPaintedSoftwareMainUI())
 		{
 			return;
 		}
